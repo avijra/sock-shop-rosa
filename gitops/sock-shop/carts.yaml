@@ -86,7 +86,7 @@ spec:
     spec:
       containers:
       - name: carts-db
-        image: weaveworksdemos/carts-db:0.3.0
+        image: mysql:5.7
         ports:
         - containerPort: 3306
         env:

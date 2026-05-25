@@ -1,36 +1,30 @@
 ---
-- name: Create GitHub repo and push code (auth via token)
+- name: Push Git repo to GitHub
   hosts: localhost
   connection: local
   gather_facts: false
   vars:
     repo_name: sock-shop-rosa
-    repo_description: "Sock Shop microservices on ROSA with Tekton pipeline + ArgoCD GitOps"
     git_user: avijra
-    # The authenticated URL uses the token as password
-    git_auth_url: "https://avijra:{{ GIT_PUSH_TOKEN }}@github.com/avijra/sock-shop-rosa.git"
 
   tasks:
-    - name: Create repo on GitHub via API
-      ansible.builtin.uri:
-        url: "https://api.github.com/user/repos"
-        method: POST
-        headers:
-          Authorization: "token {{ GIT_PUSH_TOKEN }}"
-          Accept: "application/vnd.github.v3+json"
-        body:
-          name: "{{ repo_name }}"
-          description: "{{ repo_description }}"
-          private: false
-        body_format: json
-        status_code: [201, 422]
+    - name: Create GitHub repo via API
+      ansible.builtin.shell:
+        cmd: >
+          curl -s -o /dev/null -w "%{http_code}"
+          -H "Authorization: token {{ GIT_PUSH_TOKEN }}"
+          -H "Accept: application/vnd.github.v3+json"
+          -d '{"name":"sock-shop-rosa","description":"Sock Shop microservices on ROSA with Tekton + ArgoCD","private":false}'
+          https://api.github.com/user/repos
       register: repo_create
+      changed_when: repo_create.stdout == "201"
+      failed_when: repo_create.stdout not in ["201", "422"]
 
     - name: Set git remote with token auth
       ansible.builtin.shell:
         cmd: |
           git remote remove origin 2>/dev/null || true
-          git remote add origin '{{ git_auth_url }}'
+          git remote add origin 'https://{{ git_user }}:{{ GIT_PUSH_TOKEN }}@github.com/{{ git_user }}/{{ repo_name }}.git'
           echo "Remote set"
       args:
         chdir: "{{ playbook_dir }}/.."
@@ -42,12 +36,10 @@
         chdir: "{{ playbook_dir }}/.."
       register: git_push
       changed_when: "'Everything up-to-date' not in git_push.stdout"
-      ignore_errors: true
+      failed_when: git_push.rc != 0 and 'Everything up-to-date' not in git_push.stdout
 
-    - name: Show push result
+    - name: Show result
       ansible.builtin.debug:
-        var: git_push.stdout_lines | default(git_push.stderr_lines)
-
-    - name: Final URL
-      ansible.builtin.debug:
-        msg: "Repo: https://github.com/avijra/sock-shop-rosa"
+        msg:
+          - "Repo: https://github.com/{{ git_user }}/{{ repo_name }}"
+          - "Push: {{ 'Success' if git_push.rc == 0 or 'Everything up-to-date' in git_push.stdout else 'Failed' }}"

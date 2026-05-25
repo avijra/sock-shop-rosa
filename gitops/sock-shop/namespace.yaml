@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: microservice-app
+  labels:
+    app: sock-shop
+    argocd.argoproj.io/managed-by: openshift-gitops

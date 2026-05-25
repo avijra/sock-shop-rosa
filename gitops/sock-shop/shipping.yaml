@@ -1,0 +1,103 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: shipping
+  namespace: microservice-app
+  labels:
+    name: shipping
+    app: sock-shop
+spec:
+  ports:
+  - port: 80
+    targetPort: 80
+  selector:
+    name: shipping
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shipping
+  namespace: microservice-app
+  labels:
+    name: shipping
+    app: sock-shop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      name: shipping
+  template:
+    metadata:
+      labels:
+        name: shipping
+        app: sock-shop
+    spec:
+      containers:
+      - name: shipping
+        image: weaveworksdemos/shipping:0.4.8
+        ports:
+        - containerPort: 80
+        env:
+        - name: JAVA_OPTS
+          value: "-Xms64m -Xmx128m -XX:+UseG1GC -Djava.security.egd=file:/dev/urandom -Dspring.zipkin.enabled=false"
+        - name: SPRING_DATASOURCE_URL
+          value: "jdbc:mysql://shipping-db:3306/shipping"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shipping-db
+  namespace: microservice-app
+  labels:
+    name: shipping-db
+    app: sock-shop
+spec:
+  ports:
+  - port: 3306
+    targetPort: 3306
+  selector:
+    name: shipping-db
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shipping-db
+  namespace: microservice-app
+  labels:
+    name: shipping-db
+    app: sock-shop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      name: shipping-db
+  template:
+    metadata:
+      labels:
+        name: shipping-db
+        app: sock-shop
+    spec:
+      containers:
+      - name: shipping-db
+        image: weaveworksdemos/shipping-db:0.3.0
+        ports:
+        - containerPort: 3306
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          value: "fake-password"
+        - name: MYSQL_DATABASE
+          value: "shipping"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 100Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi

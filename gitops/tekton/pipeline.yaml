@@ -1,0 +1,45 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: sock-shop-deploy-pipeline
+  namespace: openshift-pipelines
+spec:
+  params:
+  - name: gitops-repo-url
+    type: string
+    default: "https://github.com/avijra/sock-shop-gitops.git"
+  - name: revision
+    type: string
+    default: main
+  - name: manifest-path
+    type: string
+    default: sock-shop
+  - name: target-namespace
+    type: string
+    default: microservice-app
+  workspaces:
+  - name: shared-data
+  tasks:
+  - name: deploy-manifests
+    taskRef:
+      name: apply-manifests
+      kind: Task
+    params:
+    - name: manifest_dir
+      value: "$(params.manifest-path)"
+    - name: namespace
+      value: "$(params.target-namespace)"
+  - name: sync-gitops
+    taskRef:
+      name: update-gitops-repo
+      kind: Task
+    params:
+    - name: repo-url
+      value: "$(params.gitops-repo-url)"
+    - name: revision
+      value: "$(params.revision)"
+    workspaces:
+    - name: gitops-source
+      workspace: shared-data
+    runAfter:
+    - deploy-manifests

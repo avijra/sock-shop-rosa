@@ -1,54 +1,22 @@
 ---
-- name: Install OpenShift Operators via OLM
+- name: Install OpenShift Operators and Sock Shop via oc CLI
   hosts: all
   gather_facts: false
   vars:
-    kubeconfig_path: ~/.kube/config
-    operators:
-      - name: openshift-pipelines-operator-rh
-        namespace: openshift-operators
-        channel: latest
-        approval: Automatic
-        source: redhat-operators
-        source_namespace: openshift-marketplace
-        csv: openshift-pipelines-operator-rh
-      - name: openshift-gitops-operator
-        namespace: openshift-operators
-        channel: latest
-        approval: Automatic
-        source: redhat-operators
-        source_namespace: openshift-marketplace
-        csv: openshift-gitops-operator
+    kubeconfig: "{{ lookup('env', 'HOME') }}/.kube/config"
 
   tasks:
-    - name: Ensure OperatorHub is enabled
+    - name: Create required namespaces
       ansible.builtin.shell:
-        cmd: oc get operatorhub cluster -o jsonpath='{.status.sources[?(@.name=="redhat-operators")].status}'
-      register: operatorhub_status
+        cmd: |
+          oc create ns openshift-pipelines --dry-run=client -o yaml | oc apply -f -
+          oc create ns microservice-app --dry-run=client -o yaml | oc apply -f -
       changed_when: false
 
-    - name: Create Namespace for Tekton
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        name: openshift-pipelines
-        api_version: v1
-        kind: Namespace
-        state: present
-      tags: tekton
-
-    - name: Create Namespace for Sock Shop
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        name: "microservice-app"
-        api_version: v1
-        kind: Namespace
-        state: present
-
     - name: Install OpenShift Pipelines Operator Subscription
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
+      ansible.builtin.shell:
+        cmd: |
+          cat <<'EOF' | oc apply -f -
           apiVersion: operators.coreos.com/v1alpha1
           kind: Subscription
           metadata:
@@ -60,14 +28,13 @@
             source: redhat-operators
             sourceNamespace: openshift-marketplace
             installPlanApproval: Automatic
+          EOF
       register: tekton_sub
-      tags: tekton
 
     - name: Install OpenShift GitOps Operator Subscription
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
+      ansible.builtin.shell:
+        cmd: |
+          cat <<'EOF' | oc apply -f -
           apiVersion: operators.coreos.com/v1alpha1
           kind: Subscription
           metadata:
@@ -79,67 +46,37 @@
             source: redhat-operators
             sourceNamespace: openshift-marketplace
             installPlanApproval: Automatic
+          EOF
       register: gitops_sub
-      tags: gitops
 
-    - name: Wait for Tekton CSV to be ready
-      kubernetes.core.k8s_info:
-        kubeconfig: "{{ kubeconfig_path }}"
-        api_version: operators.coreos.com/v1alpha1
-        kind: ClusterServiceVersion
-        namespace: openshift-operators
-        name: openshift-pipelines-operator-rh
-      register: tekton_csv
-      retries: 30
-      delay: 15
-      until: tekton_csv.resources | default([]) | length > 0 and tekton_csv.resources[0].status.phase | default("") == "Succeeded"
-      tags: tekton
+    - name: Wait for Tekton CSV to succeed
+      ansible.builtin.shell:
+        cmd: |
+          for i in $(seq 1 40); do
+            PHASE=$(oc get csv -n openshift-operators openshift-pipelines-operator-rh -o jsonpath='{.status.phase}' 2>/dev/null)
+            if [ "$PHASE" = "Succeeded" ]; then echo "TEKTON_READY"; exit 0; fi
+            sleep 15
+          done
+          echo "TIMEOUT"
+          exit 1
+        timeout: 600
+      register: tekton_wait
 
-    - name: Wait for GitOps CSV to be ready
-      kubernetes.core.k8s_info:
-        kubeconfig: "{{ kubeconfig_path }}"
-        api_version: operators.coreos.com/v1alpha1
-        kind: ClusterServiceVersion
-        namespace: openshift-operators
-        name: openshift-gitops-operator
-      register: gitops_csv
-      retries: 30
-      delay: 15
-      until: gitops_csv.resources | default([]) | length > 0 and gitops_csv.resources[0].status.phase | default("") == "Succeeded"
-      tags: gitops
-
-    - name: Verify Tekton CRDs available
-      kubernetes.core.k8s_info:
-        kubeconfig: "{{ kubeconfig_path }}"
-        api_version: v1
-        kind: List
-        api: apiextensions.k8s.io/v1
-        resource: customresourcedefinitions
-        label_selectors:
-          - "operators.coreos.com/openshift-pipelines-operator-rh.openshift-operators"
-      register: tekton_crds
-      retries: 20
-      delay: 10
-      until: tekton_crds.resources | default([]) | length > 0
-      tags: tekton
-
-    - name: Verify GitOps CRDs available
-      kubernetes.core.k8s_info:
-        kubeconfig: "{{ kubeconfig_path }}"
-        api_version: v1
-        kind: List
-        api: apiextensions.k8s.io/v1
-        resource: customresourcedefinitions
-        label_selectors:
-          - "operators.coreos.com/openshift-gitops-operator.openshift-operators"
-      register: gitops_crds
-      retries: 20
-      delay: 10
-      until: gitops_crds.resources | default([]) | length > 0
-      tags: gitops
+    - name: Wait for GitOps CSV to succeed
+      ansible.builtin.shell:
+        cmd: |
+          for i in $(seq 1 40); do
+            PHASE=$(oc get csv -n openshift-operators openshift-gitops-operator -o jsonpath='{.status.phase}' 2>/dev/null)
+            if [ "$PHASE" = "Succeeded" ]; then echo "GITOPS_READY"; exit 0; fi
+            sleep 15
+          done
+          echo "TIMEOUT"
+          exit 1
+        timeout: 600
+      register: gitops_wait
 
     - name: Report operator status
       ansible.builtin.debug:
         msg:
-          - "Tekton Pipelines Operator: {{ 'INSTALLED' if tekton_csv.resources[0].status.phase == 'Succeeded' else 'PENDING' }}"
-          - "OpenShift GitOps Operator: {{ 'INSTALLED' if gitops_csv.resources[0].status.phase == 'Succeeded' else 'PENDING' }}"
+          - "Tekton Pipelines: {{ tekton_wait.stdout }}"
+          - "OpenShift GitOps: {{ gitops_wait.stdout }}"

@@ -1,0 +1,56 @@
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerBinding
+metadata:
+  name: sock-shop-github-push
+  namespace: microservice-app
+spec:
+  params:
+    - name: repo-url
+      value: $(body.repository.clone_url)
+    - name: revision
+      value: $(body.ref)
+---
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerTemplate
+metadata:
+  name: sock-shop-trigger-template
+  namespace: microservice-app
+spec:
+  params:
+    - name: repo-url
+    - name: revision
+      default: main
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1
+      kind: PipelineRun
+      metadata:
+        generateName: sock-shop-ci-
+        namespace: microservice-app
+        labels:
+          app: sock-shop
+      spec:
+        pipelineRef:
+          name: sock-shop-ci
+        params:
+          - name: repo-url
+            value: $(tt:params.repo-url)
+          - name: revision
+            value: $(tt:params.revision)
+        workspaces:
+          - name: shared-workspace
+            persistentVolumeClaim:
+              claimName: sock-shop-pipeline-workspace
+---
+apiVersion: triggers.tekton.dev/v1beta1
+kind: EventListener
+metadata:
+  name: sock-shop-ci-listener
+  namespace: microservice-app
+spec:
+  serviceAccountName: pipeline
+  triggers:
+    - name: github-push
+      bindings:
+        - ref: sock-shop-github-push
+      template:
+        ref: sock-shop-trigger-template

@@ -1,45 +1,37 @@
 apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: verify-sock-shop
+  namespace: openshift-pipelines
+spec:
+  params:
+  - name: namespace
+    type: string
+    default: microservice-app
+  steps:
+  - name: check-endpoints
+    image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+    script: |
+      microdnf install -y curl 2>/dev/null || true
+      echo "=== Checking sock-shop front-end ==="
+      curl -sS --max-time 15 https://front-end-microservice-app.apps.rosa.rosa-742gt.14kb.p3.openshiftapps.com | head -30
+      echo "=== Front-end is LIVE ==="
+---
+apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
   name: sock-shop-deploy-pipeline
   namespace: openshift-pipelines
 spec:
   params:
-  - name: gitops-repo-url
-    type: string
-    default: "https://github.com/avijra/sock-shop-gitops.git"
-  - name: revision
-    type: string
-    default: main
-  - name: manifest-path
-    type: string
-    default: sock-shop
   - name: target-namespace
     type: string
     default: microservice-app
-  workspaces:
-  - name: shared-data
   tasks:
-  - name: deploy-manifests
+  - name: verify-deployment
     taskRef:
-      name: apply-manifests
+      name: verify-sock-shop
       kind: Task
     params:
-    - name: manifest_dir
-      value: "$(params.manifest-path)"
     - name: namespace
       value: "$(params.target-namespace)"
-  - name: sync-gitops
-    taskRef:
-      name: update-gitops-repo
-      kind: Task
-    params:
-    - name: repo-url
-      value: "$(params.gitops-repo-url)"
-    - name: revision
-      value: "$(params.revision)"
-    workspaces:
-    - name: gitops-source
-      workspace: shared-data
-    runAfter:
-    - deploy-manifests

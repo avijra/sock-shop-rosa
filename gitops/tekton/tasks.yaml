@@ -28,7 +28,6 @@ spec:
         echo "[clone] Repo:   $(params.repo-url)"
         echo "[clone] Branch: $(params.revision)"
 
-        # Idempotent clone: if .git exists, fetch and reset; otherwise do a fresh clone
         if [ -d "$TARGET/.git" ]; then
           echo "[clone] .git exists — fetching updates"
           cd "$TARGET"
@@ -39,7 +38,8 @@ spec:
           git clean -fdx
         else
           echo "[clone] Fresh clone"
-          rm -rf "$TARGET"
+          # Cannot rm -rf the mount point itself (PVC). Remove contents instead.
+          find "$TARGET" -mindepth 1 -delete 2>/dev/null || true
           git clone --depth 1 --branch "$(params.revision)" "$(params.repo-url)" "$TARGET"
         fi
 
@@ -62,10 +62,12 @@ spec:
     - name: source
   steps:
     - name: validate
-      image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+      image: registry.access.redhat.com/ubi9/python-311:latest
       script: |
+        #!/bin/bash
         set -e
         echo "=== Validating YAML syntax ==="
+        pip install --quiet pyyaml 2>/dev/null
         for f in $(find "$(workspaces.source.path)" -name '*.yaml' ! -path '*/node_modules/*'); do
           python3 -c "
 import sys, yaml
@@ -93,16 +95,17 @@ spec:
     - name: validate
       image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
       script: |
+        #!/bin/bash
         set -e
         MANIFEST_DIR="$(workspaces.source.path)/$(params.manifest-dir)"
-        echo "=== Validating manifests with kubectl dry-run ==="
+        echo "=== Validating manifests at $MANIFEST_DIR ==="
         if [ -d "$MANIFEST_DIR" ]; then
           for f in "$MANIFEST_DIR"/*.yaml; do
             [ -f "$f" ] || continue
-            echo "Checking: $(basename $f)"
-            kubectl apply --dry-run=client -f "$f" 2>&1 || true
+            echo "  Dry-run: $(basename $f)"
+            kubectl apply --dry-run=client -f "$f" 2>&1
           done
-          echo "Validation complete"
+          echo "=== All manifests pass dry-run validation ==="
         else
           echo "No manifests found at $MANIFEST_DIR"
         fi

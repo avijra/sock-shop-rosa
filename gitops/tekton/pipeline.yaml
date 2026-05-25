@@ -1,37 +1,80 @@
 apiVersion: tekton.dev/v1
-kind: Task
-metadata:
-  name: verify-sock-shop
-  namespace: openshift-pipelines
-spec:
-  params:
-  - name: namespace
-    type: string
-    default: microservice-app
-  steps:
-  - name: check-endpoints
-    image: registry.access.redhat.com/ubi9/ubi-minimal:latest
-    script: |
-      microdnf install -y curl 2>/dev/null || true
-      echo "=== Checking sock-shop front-end ==="
-      curl -sS --max-time 15 https://front-end-microservice-app.apps.rosa.rosa-742gt.14kb.p3.openshiftapps.com | head -30
-      echo "=== Front-end is LIVE ==="
----
-apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
-  name: sock-shop-deploy-pipeline
-  namespace: openshift-pipelines
+  name: sock-shop-ci
+  namespace: microservice-app
+spec:
+  workspaces:
+    - name: shared-workspace
+  params:
+    - name: repo-url
+      type: string
+      description: Git repo to clone
+    - name: revision
+      type: string
+      default: main
+  tasks:
+    - name: clone
+      taskRef:
+        name: git-clone
+      workspaces:
+        - name: output
+          workspace: shared-workspace
+      params:
+        - name: repo-url
+          value: $(params.repo-url)
+        - name: revision
+          value: $(params.revision)
+
+    - name: yaml-lint
+      taskRef:
+        name: yaml-lint
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+      runAfter:
+        - clone
+
+    - name: validate-manifests
+      taskRef:
+        name: validate-manifests
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+      runAfter:
+        - clone
+
+    - name: summary
+      taskRef:
+        name: pipeline-summary
+      params:
+        - name: commit-sha
+          value: $(tasks.clone.results.commit-sha)
+        - name: commit-date
+          value: $(tasks.clone.results.commit-date)
+      runAfter:
+        - yaml-lint
+        - validate-manifests
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: pipeline-summary
+  namespace: microservice-app
 spec:
   params:
-  - name: target-namespace
-    type: string
-    default: microservice-app
-  tasks:
-  - name: verify-deployment
-    taskRef:
-      name: verify-sock-shop
-      kind: Task
-    params:
-    - name: namespace
-      value: "$(params.target-namespace)"
+    - name: commit-sha
+      type: string
+    - name: commit-date
+      type: string
+  steps:
+    - name: print
+      image: bitnami/git:latest
+      script: |
+        echo "========================================"
+        echo "  SOCK-SHOP CI PIPELINE COMPLETE"
+        echo "========================================"
+        echo "  Commit: $(params.commit-sha)"
+        echo "  Date:   $(params.commit-date)"
+        echo "  Status: SUCCESS"
+        echo "========================================"

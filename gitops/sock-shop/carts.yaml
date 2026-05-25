@@ -1,0 +1,103 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: carts
+  namespace: microservice-app
+  labels:
+    name: carts
+    app: sock-shop
+spec:
+  ports:
+  - port: 80
+    targetPort: 80
+  selector:
+    name: carts
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: carts
+  namespace: microservice-app
+  labels:
+    name: carts
+    app: sock-shop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      name: carts
+  template:
+    metadata:
+      labels:
+        name: carts
+        app: sock-shop
+    spec:
+      containers:
+      - name: carts
+        image: weaveworksdemos/carts:0.4.8
+        ports:
+        - containerPort: 80
+        env:
+        - name: JAVA_OPTS
+          value: "-Xms64m -Xmx128m -XX:+UseG1GC -Djava.security.egd=file:/dev/urandom -Dspring.zipkin.enabled=false"
+        - name: SPRING_DATASOURCE_URL
+          value: "jdbc:mysql://carts-db:3306/carts"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: carts-db
+  namespace: microservice-app
+  labels:
+    name: carts-db
+    app: sock-shop
+spec:
+  ports:
+  - port: 3306
+    targetPort: 3306
+  selector:
+    name: carts-db
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: carts-db
+  namespace: microservice-app
+  labels:
+    name: carts-db
+    app: sock-shop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      name: carts-db
+  template:
+    metadata:
+      labels:
+        name: carts-db
+        app: sock-shop
+    spec:
+      containers:
+      - name: carts-db
+        image: weaveworksdemos/carts-db:0.3.0
+        ports:
+        - containerPort: 3306
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          value: "fake-password"
+        - name: MYSQL_DATABASE
+          value: "carts"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 100Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi

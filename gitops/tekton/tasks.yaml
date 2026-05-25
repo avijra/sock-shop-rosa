@@ -20,8 +20,10 @@ spec:
     - name: clone
       image: bitnami/git:latest
       script: |
-        git clone --depth 1 --branch "$(params.revision)" "$(params.repo-url)" "$(workspaces.output.path)"
-        cd "$(workspaces.output.path)"
+        TARGET="$(workspaces.output.path)"
+        rm -rf "$TARGET"/*
+        git clone --depth 1 --branch "$(params.revision)" "$(params.repo-url)" "$TARGET"
+        cd "$TARGET"
         printf '%s' "$(git rev-parse HEAD)" | tee "$(results.commit-sha.path)"
         printf '%s' "$(git log -1 --format=%cI)" | tee "$(results.commit-date.path)"
 ---

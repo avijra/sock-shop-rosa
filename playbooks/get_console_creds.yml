@@ -1,0 +1,42 @@
+---
+- name: Get OpenShift console credentials
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Console URL
+      ansible.builtin.shell:
+        cmd: oc whoami --show-console 2>/dev/null
+      register: console_url
+      changed_when: false
+      ignore_errors: true
+
+    - name: Kubeadmin password
+      ansible.builtin.shell:
+        cmd: oc get secret kubeadmin -n kube-system -o jsonpath='{.data.password}' 2>/dev/null | base64 -d
+      register: kubeadmin_pass
+      changed_when: false
+      ignore_errors: true
+
+    - name: OAuth identity providers
+      ansible.builtin.shell:
+        cmd: oc get oauth cluster -o jsonpath='{.spec.identityProviders}' 2>/dev/null
+      register: oauth_idps
+      changed_when: false
+      ignore_errors: true
+
+    - name: Current user and token info
+      ansible.builtin.shell:
+        cmd: |
+          echo "user: $(oc whoami 2>/dev/null)"
+          echo "token: $(oc whoami -t 2>/dev/null | head -c40)..."
+      register: user_info
+      changed_when: false
+      ignore_errors: true
+
+    - name: Show results
+      ansible.builtin.debug:
+        msg:
+          - "Console URL: {{ console_url.stdout if console_url.stdout else 'N/A' }}"
+          - "Password: {{ kubeadmin_pass.stdout if kubeadmin_pass.stdout else 'No kubeadmin secret (ROSA) - see below' }}"
+          - "IDPs: {{ oauth_idps.stdout if oauth_idps.stdout else 'No custom IDPs configured' }}"
+          - "{{ user_info.stdout if user_info.stdout else '' }}"

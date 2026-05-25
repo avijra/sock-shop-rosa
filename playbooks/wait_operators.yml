@@ -1,0 +1,51 @@
+---
+- name: Wait for operators and verify
+  hosts: all
+  gather_facts: false
+
+  tasks:
+    - name: Wait for Tekton CSV to succeed (up to 10 min)
+      ansible.builtin.shell:
+        cmd: |
+          for i in $(seq 1 40); do
+            PHASE=$(oc get csv -n openshift-operators openshift-pipelines-operator-rh -o jsonpath='{.status.phase}' 2>/dev/null)
+            if [ "$PHASE" = "Succeeded" ]; then echo "TEKTON_READY"; exit 0; fi
+            sleep 15
+          done
+          echo "TEKTON_TIMEOUT"
+          exit 1
+      register: tekton_wait
+      changed_when: false
+
+    - name: Wait for GitOps CSV to succeed (up to 10 min)
+      ansible.builtin.shell:
+        cmd: |
+          for i in $(seq 1 40); do
+            PHASE=$(oc get csv -n openshift-operators openshift-gitops-operator -o jsonpath='{.status.phase}' 2>/dev/null)
+            if [ "$PHASE" = "Succeeded" ]; then echo "GITOPS_READY"; exit 0; fi
+            sleep 15
+          done
+          echo "GITOPS_TIMEOUT"
+          exit 1
+      register: gitops_wait
+      changed_when: false
+
+    - name: Verify Tekton CRDs
+      ansible.builtin.shell:
+        cmd: oc api-resources --api-group=tekton.dev 2>&1 | head -20
+      register: tekton_crds
+      changed_when: false
+
+    - name: Verify GitOps CRDs
+      ansible.builtin.shell:
+        cmd: oc api-resources --api-group=argoproj.io 2>&1 | head -20
+      register: gitops_crds
+      changed_when: false
+
+    - name: Report status
+      ansible.builtin.debug:
+        msg:
+          - "Tekton Pipelines: {{ tekton_wait.stdout }}"
+          - "OpenShift GitOps: {{ gitops_wait.stdout }}"
+          - "Tekton CRDs available: {{ tekton_crds.stdout_lines | length > 0 }}"
+          - "GitOps CRDs available: {{ gitops_crds.stdout_lines | length > 0 }}"

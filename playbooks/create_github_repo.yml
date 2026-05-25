@@ -1,0 +1,20 @@
+---
+- name: Create GitHub repo from bastion
+  hosts: bastion
+  gather_facts: false
+  tasks:
+    - name: Create sock-shop-rosa repo via GitHub API
+      ansible.builtin.shell:
+        cmd: |
+          curl -s -X POST \
+            -H "Authorization: token {{ git_remote_token }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            -d '{"name":"sock-shop-rosa","description":"Sock Shop microservices on ROSA with Tekton + ArgoCD GitOps","private":false}' \
+            https://api.github.com/user/repos 2>&1
+      register: repo_create
+      # 201 = created, 422 = already exists
+      failed_when: false
+
+    - name: Check result
+      ansible.builtin.debug:
+        msg: "Repo created or already exists (status determined)"

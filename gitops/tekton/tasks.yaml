@@ -38,13 +38,19 @@ spec:
     - name: source
   steps:
     - name: validate
-      image: bitnami/python:latest
+      image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
       script: |
-        pip install pyyaml -q
-        find "$(workspaces.source.path)" -name '*.yaml' ! -path '*/node_modules/*' -exec sh -c '
-          python3 -c "import yaml; yaml.safe_load(open(chr(0)))" "$1" 2>&1 || exit 1
-        ' {} \;
-        echo "All YAML valid"
+        set -e
+        echo "=== Validating YAML syntax ==="
+        for f in $(find "$(workspaces.source.path)" -name '*.yaml' ! -path '*/node_modules/*'); do
+          python3 -c "
+import sys, yaml
+with open('$f') as fh:
+    yaml.safe_load(fh)
+print(f'OK: $f')
+" 2>&1 || exit 1
+        done
+        echo "All YAML files valid"
 ---
 apiVersion: tekton.dev/v1
 kind: Task
@@ -52,7 +58,7 @@ metadata:
   name: validate-manifests
   namespace: microservice-app
 spec:
-  description: Validate K8s manifests
+  description: Validate K8s manifests with kubectl dry-run
   workspaces:
     - name: source
   params:
@@ -60,7 +66,19 @@ spec:
       type: string
       default: gitops/sock-shop
   steps:
-    - name: kubeconform
-      image: ghcr.io/yannh/kubeconform:latest
+    - name: validate
+      image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
       script: |
-        kubeconform -summary -skip ServiceAccount "$(workspaces.source.path)/$(params.manifest-dir)" 2>&1 || true
+        set -e
+        MANIFEST_DIR="$(workspaces.source.path)/$(params.manifest-dir)"
+        echo "=== Validating manifests with kubectl dry-run ==="
+        if [ -d "$MANIFEST_DIR" ]; then
+          for f in "$MANIFEST_DIR"/*.yaml; do
+            [ -f "$f" ] || continue
+            echo "Checking: $(basename $f)"
+            kubectl apply --dry-run=client -f "$f" 2>&1 || true
+          done
+          echo "Validation complete"
+        else
+          echo "No manifests found at $MANIFEST_DIR"
+        fi

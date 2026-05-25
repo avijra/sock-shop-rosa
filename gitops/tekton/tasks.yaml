@@ -1,55 +1,64 @@
 apiVersion: tekton.dev/v1
 kind: Task
 metadata:
-  name: apply-manifests
-  namespace: openshift-pipelines
+  name: git-clone
+  namespace: microservice-app
 spec:
+  description: Clone a git repository to the workspace
+  workspaces:
+    - name: output
   params:
-  - name: manifest_dir
-    type: string
-    description: Path to the manifest directory
-    default: ./gitops/sock-shop
-  - name: namespace
-    type: string
-    default: microservice-app
+    - name: repo-url
+      type: string
+    - name: revision
+      type: string
+      default: main
+  results:
+    - name: commit-sha
+    - name: commit-date
   steps:
-  - name: apply
-    image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
-    script: |
-      oc apply -f $(params.manifest_dir) -n $(params.namespace) --recursive
-  - name: verify
-    image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
-    script: |
-      echo "Verifying deployments..."
-      oc rollout status deploy/front-end -n $(params.namespace) --timeout=120s || true
-      oc rollout status deploy/catalogue -n $(params.namespace) --timeout=120s || true
-      oc rollout status deploy/carts -n $(params.namespace) --timeout=120s || true
-      oc rollout status deploy/orders -n $(params.namespace) --timeout=120s || true
-      oc rollout status deploy/shipping -n $(params.namespace) --timeout=120s || true
-      oc rollout status deploy/queue-master -n $(params.namespace) --timeout=120s || true
-      oc rollout status deploy/user -n $(params.namespace) --timeout=120s || true
-      oc get pods -n $(params.namespace)
+    - name: clone
+      image: bitnami/git:latest
+      script: |
+        git clone --depth 1 --branch "$(params.revision)" "$(params.repo-url)" "$(workspaces.output.path)"
+        cd "$(workspaces.output.path)"
+        printf '%s' "$(git rev-parse HEAD)" | tee "$(results.commit-sha.path)"
+        printf '%s' "$(git log -1 --format=%cI)" | tee "$(results.commit-date.path)"
 ---
 apiVersion: tekton.dev/v1
 kind: Task
 metadata:
-  name: update-gitops-repo
-  namespace: openshift-pipelines
+  name: yaml-lint
+  namespace: microservice-app
 spec:
-  params:
-  - name: repo-url
-    type: string
-    description: GitOps repository URL
-  - name: revision
-    type: string
-    default: main
+  description: Validate YAML syntax
   workspaces:
-  - name: gitops-source
+    - name: source
   steps:
-  - name: sync-to-gitops
-    image: image-registry.openshift-image-registry.svc:5000/openshift/git-tools:latest
-    script: |
-      echo "Simulating GitOps repo sync..."
-      echo "Would push manifests to $(params.repo-url)"
-      echo "Revision: $(params.revision)"
-      echo "Sync complete — ArgoCD will pick up changes automatically"
+    - name: validate
+      image: bitnami/python:latest
+      script: |
+        pip install pyyaml -q
+        find "$(workspaces.source.path)" -name '*.yaml' ! -path '*/node_modules/*' -exec sh -c '
+          python3 -c "import yaml; yaml.safe_load(open(chr(0)))" "$1" 2>&1 || exit 1
+        ' {} \;
+        echo "All YAML valid"
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: validate-manifests
+  namespace: microservice-app
+spec:
+  description: Validate K8s manifests
+  workspaces:
+    - name: source
+  params:
+    - name: manifest-dir
+      type: string
+      default: gitops/sock-shop
+  steps:
+    - name: kubeconform
+      image: ghcr.io/yannh/kubeconform:latest
+      script: |
+        kubeconform -summary -skip ServiceAccount "$(workspaces.source.path)/$(params.manifest-dir)" 2>&1 || true

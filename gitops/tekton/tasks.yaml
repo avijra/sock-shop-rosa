@@ -4,7 +4,7 @@ metadata:
   name: git-clone
   namespace: microservice-app
 spec:
-  description: Clone a git repository to the workspace
+  description: Clone a git repository to the workspace (idempotent)
   workspaces:
     - name: output
   params:
@@ -20,13 +20,36 @@ spec:
     - name: clone
       image: bitnami/git:latest
       script: |
+        #!/bin/bash
+        set -euo pipefail
         TARGET="$(workspaces.output.path)"
-        # Remove ALL existing content including hidden files (.git/)
-        find "$TARGET" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
-        git clone --depth 1 --branch "$(params.revision)" "$(params.repo-url)" "$TARGET"
+
+        echo "[clone] Target: $TARGET"
+        echo "[clone] Repo:   $(params.repo-url)"
+        echo "[clone] Branch: $(params.revision)"
+
+        # Idempotent clone: if .git exists, fetch and reset; otherwise do a fresh clone
+        if [ -d "$TARGET/.git" ]; then
+          echo "[clone] .git exists — fetching updates"
+          cd "$TARGET"
+          git remote set-url origin "$(params.repo-url)" 2>/dev/null || git remote add origin "$(params.repo-url)"
+          git fetch --depth 1 origin "$(params.revision)"
+          git checkout "$(params.revision)" 2>/dev/null || git checkout -b "$(params.revision)" "origin/$(params.revision)"
+          git reset --hard "origin/$(params.revision)"
+          git clean -fdx
+        else
+          echo "[clone] Fresh clone"
+          rm -rf "$TARGET"
+          git clone --depth 1 --branch "$(params.revision)" "$(params.repo-url)" "$TARGET"
+        fi
+
         cd "$TARGET"
-        printf '%s' "$(git rev-parse HEAD)" | tee "$(results.commit-sha.path)"
-        printf '%s' "$(git log -1 --format=%cI)" | tee "$(results.commit-date.path)"
+        SHA="$(git rev-parse HEAD)"
+        DATE="$(git log -1 --format=%cI)"
+        echo "[clone] SHA:  $SHA"
+        echo "[clone] Date: $DATE"
+        printf '%s' "$SHA" | tee "$(results.commit-sha.path)"
+        printf '%s' "$DATE" | tee "$(results.commit-date.path)"
 ---
 apiVersion: tekton.dev/v1
 kind: Task

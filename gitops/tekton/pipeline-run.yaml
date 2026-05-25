@@ -1,20 +1,17 @@
 apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
-  name: sock-shop-deploy-run-001
-  namespace: openshift-pipelines
-  labels:
-    tekton.dev/pipeline: sock-shop-deploy-pipeline
+  generateName: sock-shop-ci-manual-
+  namespace: microservice-app
 spec:
   pipelineRef:
-    name: sock-shop-deploy-pipeline
+    name: sock-shop-ci
   params:
-  - name: gitops-repo-url
-    value: "https://github.com/avijra/sock-shop-gitops.git"
-  - name: revision
-    value: main
-  - name: target-namespace
-    value: microservice-app
+    - name: repo-url
+      value: https://github.com/avijra/sock-shop-rosa.git
+    - name: revision
+      value: main
   workspaces:
-  - name: shared-data
-    emptyDir: {}
+    - name: shared-workspace
+      persistentVolumeClaim:
+        claimName: sock-shop-pipeline-workspace

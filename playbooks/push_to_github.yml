@@ -1,0 +1,55 @@
+---
+- name: Create GitHub repo and push code
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    repo_name: sock-shop-rosa
+    repo_description: "Sock Shop microservices on ROSA with Tekton pipeline + ArgoCD GitOps"
+    git_remote_url: "https://github.com/avijra/sock-shop-rosa.git"
+
+  tasks:
+    - name: Create repo on GitHub
+      ansible.builtin.uri:
+        url: "https://api.github.com/user/repos"
+        method: POST
+        headers:
+          Authorization: "token {{ git_push_token }}"
+          Accept: "application/vnd.github.v3+json"
+        body:
+          name: "{{ repo_name }}"
+          description: "{{ repo_description }}"
+          private: false
+        body_format: json
+        status_code: [201, 422]
+      register: repo_create
+      ignore_errors: true
+
+    - name: Show repo creation result
+      ansible.builtin.debug:
+        msg: "Repo created or already exists: {{ repo_create.status == 201 or repo_create.status == 422 }}"
+
+    - name: Set git remote origin
+      ansible.builtin.shell:
+        cmd: |
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "{{ git_remote_url }}"
+          echo "Remote set to {{ git_remote_url }}"
+      args:
+        chdir: "{{ playbook_dir }}/.."
+      register: remote_set
+
+    - name: Push to GitHub
+      ansible.builtin.shell:
+        cmd: git push -u origin main 2>&1
+      args:
+        chdir: "{{ playbook_dir }}/.."
+      environment:
+        GIT_ASKPASS: /bin/echo
+      register: git_push
+      failed_when: git_push.rc != 0 and "Everything up-to-date" not in git_push.stdout
+      ignore_errors: true
+
+    - name: Show push result
+      ansible.builtin.debug:
+        msg: "{{ git_push.stdout_lines if git_push.stdout_lines else git_push.stderr_lines }}"

@@ -1,0 +1,35 @@
+---
+- name: Deploy sock-shop, Tekton pipelines, and GitOps
+  hosts: all
+  gather_facts: false
+
+  tasks:
+    - name: Apply sock-shop manifests
+      ansible.builtin.shell:
+        cmd: |
+          oc apply -f /tmp/sock-shop-manifests/ -n microservice-app --recursive
+      changed_when: false
+
+    - name: Apply Tekton tasks and pipeline
+      ansible.builtin.shell:
+        cmd: |
+          oc apply -f /tmp/tekton-manifests/ -n openshift-pipelines --recursive
+      changed_when: false
+
+    - name: Apply ArgoCD Application
+      ansible.builtin.shell:
+        cmd: |
+          oc apply -f /tmp/argocd-manifests/ -n openshift-gitops --recursive
+      changed_when: false
+
+    - name: Wait for deployments
+      ansible.builtin.shell:
+        cmd: |
+          echo "Waiting for sock-shop deployments..."
+          for dep in front-end catalogue catalogue-db carts carts-db orders orders-db shipping shipping-db queue-master rabbitmq payment user user-db; do
+            oc rollout status deploy/$dep -n microservice-app --timeout=180s 2>/dev/null && echo "$dep: READY" || echo "$dep: WAITING"
+          done
+          echo "=== Pod Status ==="
+          oc get pods -n microservice-app
+      changed_when: false
+      register: rollout_check

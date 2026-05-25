@@ -6,9 +6,9 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/avijra/sock-shop-gitops.git
+    repoURL: https://github.com/avijra/sock-shop-rosa.git
     targetRevision: main
-    path: sock-shop
+    path: gitops/sock-shop
   destination:
     server: https://kubernetes.default.svc
     namespace: microservice-app
